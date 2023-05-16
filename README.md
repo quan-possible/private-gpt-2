@@ -22,7 +22,7 @@ how to run the code, please check the original LoRA repository linked above.
 
 1. Fine-tune GPT-2 (Medium) with DP
 ```
-python -m torch.distributed.launch --nproc_per_node=16 src/gpt2_ft.py \
+torchrun --standalone --nproc_per_node=gpu src/gpt2_ft.py \
     --train_data ./data/e2e/train.jsonl \
     --valid_data ./data/e2e/valid.jsonl \
     --train_batch_size 8 \
@@ -33,7 +33,6 @@ python -m torch.distributed.launch --nproc_per_node=16 src/gpt2_ft.py \
     --seq_len 512 \
     --model_card gpt2.md \
     --init_checkpoint ./pretrained_checkpoints/gpt2-medium-pytorch_model.bin \
-    --platform local \
     --clip 0.0 \
     --lr 0.0004 \
     --weight_decay 0.01 \

@@ -16,6 +16,18 @@ from torch.utils.data import DataLoader
 
 
 class LMOrderedIterator(object):
+    """
+    Iterator for Language Model training using a LongTensor.
+
+    Args:
+        data (LongTensor): The LongTensor containing the ordered data.
+        bsz (int): Batch size.
+        bptt (int): Backpropagation through time (BPTT) length.
+        eval_len (int, optional): Evaluation length for validation. Defaults to None.
+        device (str, optional): Device to use for tensors. Defaults to 'cpu'.
+        world_size (int, optional): Number of distributed processes. Defaults to 1.
+        rank (int, optional): Rank of the current process. Defaults to 0.
+    """
     def __init__(self, data, bsz, bptt, eval_len=None, device='cpu', world_size=1, rank=0):
         """
             data -- LongTensor -- the LongTensor is strictly ordered
@@ -72,6 +84,12 @@ class LMOrderedIterator(object):
 
 
 class Corpus(object):
+    """
+    Represents a corpus of text data.
+
+    Args:
+        path (str): Path to the corpus file.
+    """
     def __init__(self, path):
         self.path = path
         self.num_words = 0        
@@ -88,6 +106,18 @@ class Corpus(object):
 
 
 class BinLMOrderedIterator(object):
+    """
+    Iterator for Language Model training using a LongTensor.
+
+    Args:
+        corpus (Corpus): The Corpus containing the ordered data.
+        bsz (int): Batch size.
+        bptt (int): Backpropagation through time (BPTT) length.
+        eval_len (int, optional): Evaluation length for validation. Defaults to None.
+        device (str, optional): Device to use for tensors. Defaults to 'cpu'.
+        world_size (int, optional): Number of distributed processes. Defaults to 1.
+        rank (int, optional): Rank of the current process. Defaults to 0.
+    """
     def __init__(self, corpus, bsz, bptt, eval_len=None, device='cpu', world_size=1, rank=0):
         """
             data -- LongTensor -- the LongTensor is strictly ordered
@@ -143,6 +173,13 @@ class BinLMOrderedIterator(object):
 
 
 class BinCorpus(object):
+    """
+    Represents a corpus of text data.
+
+    Args:
+        path (str): Path to the corpus file.
+    """
+    
     def __init__(self, path):
         self.path = path
 
@@ -150,7 +187,8 @@ class BinCorpus(object):
         self.book_token_span.append(0)
         tokens_sum = 0
         self.num_words = 0    
-
+        
+        # read info file
         with open(path+'.info', 'r') as info_reader:
             for line in info_reader:
                 items = json.loads(line.strip())
@@ -196,6 +234,20 @@ def padding_tokens(tokens, max_seq_length, pad_token, direct, max_context_length
 
 
 class FT_Dataset(Dataset):
+    """
+    FT_Dataset is a dataset for fine-tuning. 
+
+    Args:
+        ft_file (str): Path to the fine-tuning file.
+        batch_size (int): Batch size.
+        max_seq_length (int): Max sequence length.
+        max_eval_length (int, optional): Max eval length. Defaults to 0.
+        joint_lm (bool, optional): Whether to use joint language model. Defaults to False.
+        prefix_len (int, optional): Prefix length. Defaults to 0.
+        infix_len (int, optional): Infix length. Defaults to 0.
+        prefix_cursor (int, optional): Prefix cursor. Defaults to 1000000.
+        infix_cursor (int, optional): Infix cursor. Defaults to 2000000.
+    """
     def __init__(self, ft_file, batch_size, max_seq_length, 
                  max_eval_length=0, joint_lm=False, prefix_len=0, infix_len=0, 
                  prefix_cursor=1000000, infix_cursor=2000000):

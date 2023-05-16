@@ -378,6 +378,11 @@ if __name__ == '__main__':
     if args.lora_dim > 0:
         lora.mark_only_lora_as_trainable(lm_net)
     opacus_utils.register_grad_sampler(MergedLinear)(compute_transformers_MergedLinear_grad_sample)
+    
+    # Ensure that the model's parameters are contiguous
+    for p in lm_net.parameters():
+        if not p.is_contiguous():
+            p.data = p.data.contiguous()
     lm_net = DPDDP(lm_net)
     optimizer = create_adam_optimizer_from_args(lm_net, args)
 
