@@ -1,8 +1,12 @@
+
 # GPT-2 DP Fine-Tuning
+**Copied from https://github.com/huseyinatahaninan/Differentially-Private-Fine-tuning-of-Language-Models/tree/main/Language-Generation-GPT-2**
 
 The code in this directory is based on the [original LoRA code for fine-tuning
 GPT-2](https://github.com/microsoft/LoRA/tree/main/examples/NLG), however, we think that 
-all fine-tuning methods discussed in our paper should achieve comparable accuracy. 
+all fine-tuning methods discussed in our paper should achieve comparable accuracy.
+
+
 
 For differentially-private fine-tuning of GPT-2 model series, we use the [Opacus
 library](https://github.com/pytorch/opacus). Notice that we heavily rely on distributed
@@ -18,6 +22,13 @@ is currently specific to lora_dropout=0.0 and enable_lora=[True, False, True].
 Below we provide the setting we use in our experiments. For more information on 
 how to run the code, please check the original LoRA repository linked above.
 
+## Get Model and Data
+
+```
+sh create_datasets.sh
+sh download_pretrained_checkpoints.sh
+```
+
 ## Replicating Our Result on E2E
 
 1. Fine-tune GPT-2 (Medium) with DP
@@ -25,7 +36,7 @@ how to run the code, please check the original LoRA repository linked above.
 torchrun --standalone --nproc_per_node=gpu src/gpt2_ft.py \
     --train_data ./data/e2e/train.jsonl \
     --valid_data ./data/e2e/valid.jsonl \
-    --train_batch_size 8 \
+    --train_batch_size 1 \
     --grad_acc 1 \
     --noise_multiplier 0.6 \
     --max_grad_norm 1.0 \

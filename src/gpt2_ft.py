@@ -239,7 +239,7 @@ def train_validate(
                 model_path = os.path.join(args.work_dir, f'model.{train_step}.pt')
                 print('saving checkpoint', model_path)
                 torch.save({'model_state_dict': lora.lora_state_dict(model)}, model_path)
-            distributed_sync(args)
+            torch.distributed.barrier()
 
         # evaluation interval
         if train_step % args.eval_interval == 0:
@@ -260,7 +260,7 @@ def train_validate(
                 print('-' * 100)
 
             model.train()
-            distributed_sync(args)
+            torch.distributed.barrier()
 
         if train_step == args.max_step:
             break
@@ -269,7 +269,7 @@ def train_validate(
         model_path = os.path.join(args.work_dir, f'model.{train_step}.pt')
         print('saving checkpoint', model_path)
         torch.save({'model_state_dict': model.state_dict()}, model_path) 
-    distributed_sync(args)
+    torch.distributed.barrier()
     return train_step
 
 
@@ -432,6 +432,6 @@ if __name__ == '__main__':
             print('-' * 100)
             print('Exiting from training early')
 
-    distributed_sync(args)
+    torch.distributed.barrier()
     print('cleanup dist ...')
     cleanup(args)

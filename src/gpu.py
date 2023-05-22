@@ -39,10 +39,6 @@ def distributed_gather(tensor):
     return torch.stack(g_y)
 
 
-def distributed_sync():
-    torch.distributed.barrier()
-
-
 def parse_gpu(args):
     torch.manual_seed(args.random_seed)
     args.local_rank = int(os.environ["LOCAL_RANK"])
