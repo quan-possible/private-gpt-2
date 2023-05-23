@@ -13,21 +13,22 @@ import torch
 import torch.nn.functional as F
 import random
 from torch.utils.data import DataLoader
+# from torch.distributed.elastic.multiprocessing.errors import record
 torch.set_printoptions(threshold=100000)
+
+
+import opacus
 from opacus import PrivacyEngine
 from opacus.grad_sample import utils as opacus_utils
 from opacus.layers import DifferentiallyPrivateDistributedDataParallel as DPDDP
 
 from gpu import (
     add_gpu_params, 
-    parse_gpu, 
-    distributed_opt, 
-    distributed_gather, 
-    distributed_sync, 
+    parse_gpu,
     cleanup
 )
+
 from optimizer import (
-    create_adam_optimizer, 
     create_optimizer_scheduler, 
     add_optimizer_params, 
     create_adam_optimizer_from_args
@@ -40,64 +41,8 @@ from exp_utils import create_exp_dir
 from loralib import MergedLinear
 import loralib as lora
 
-parser = argparse.ArgumentParser(description='PyTorch GPT2 ft script')
-
-add_gpu_params(parser)
-add_optimizer_params(parser)
-
-parser.add_argument('--train_data', required=True, help='location of training data corpus')
-
-parser.add_argument('--valid_data', required=True, help='location of validation data corpus')
-
-parser.add_argument('--train_batch_size', type=int, default=8, help='training batch size')
-
-parser.add_argument('--valid_batch_size', type=int, default=4, help='validation batch size')
-
-parser.add_argument('--grad_acc', type=int, default=1, help='gradient accumulation steps')
-
-parser.add_argument('--clip', type=float, default=0.0, help='gradient clip')
-
-parser.add_argument('--noise_multiplier', type=float, default=0.5, help='DP noise multiplier')
-
-parser.add_argument('--max_grad_norm', type=float, default=1.0, help='DP maximum per sample gradient norm')
-
-parser.add_argument('--seq_len', type=int, default=512, help='number of tokens to predict.')
-
-parser.add_argument('--model_card', default='gpt2.md', choices=['gpt2.sm', 'gpt2.md', 'gpt2.lg', 'gpt2.xl'], 
-                    help='model names')
-
-parser.add_argument('--init_checkpoint', default=None, help='pretrained checkpoint path')
-
-parser.add_argument('--fp16', action='store_true', help='train model with fp16')
-
-parser.add_argument('--log_interval', type=int, default=100, help='log interval')
-
-parser.add_argument('--eval_interval', type=int, default=2000, help='eval interval')
-
-parser.add_argument('--save_interval', type=int, default=500, help='save interval')
-
-parser.add_argument('--work_dir', type=str, default=os.getenv('PT_OUTPUT_DIR', 'gpt2_model'), 
-                    help='working folder.')
-
-parser.add_argument('--lora_dim', type=int, default=0, help='lora attn dimension')
-
-parser.add_argument('--lora_alpha', type=int, default=128, help='lora attn alpha')
-
-parser.add_argument('--obj', default='clm', choices=['jlm', 'clm'], 
-                    help='language model training objective')
-
-parser.add_argument('--lora_dropout', default=0.0, type=float, 
-                    help='dropout probability for lora layers')
-
-parser.add_argument('--label_smooth', default=0.0, type=float, help='label smoothing')
-
-parser.add_argument('--roll_interval', type=int, default=-1, help='rolling interval')
-
-parser.add_argument('--roll_lr', type=float, default=0.00001, help='rolling learning rate')
-
-parser.add_argument('--roll_step', type=int, default=100, help='rolling step')
-
-parser.add_argument('--eval_epoch', type=int, default=1, help='eval per number of epochs')
+print("CUDA is available:",torch.cuda.is_available())
+print("Opacus version", opacus.__version__)
 
 # influence model, calculate the influence score between two samples.
 def print_args(args):
@@ -300,12 +245,38 @@ def compute_transformers_MergedLinear_grad_sample(layer: MergedLinear, A: torch.
     lora_A_deriv = torch.einsum("nki,nkj->nij", after_A_deriv, layer.lora_dropout(A))
     opacus_utils.create_or_extend_grad_sample(layer.lora_A, lora_A_deriv.contiguous(), batch_dim)
 
+def get_gpt2_config(model_card, lora_dim, lora_alpha, lora_dropout):
+    if model_card == 'gpt2.sm':
+        config = GPT2Config(
+            n_embd=768, n_layer=12, n_head=12,
+            lora_attn_dim=lora_dim,
+            lora_attn_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+        )
+    elif model_card == 'gpt2.md':
+        config = GPT2Config(
+            n_embd=1024, n_layer=24, n_head=16,
+            lora_attn_dim=lora_dim,
+            lora_attn_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+        )
+    elif model_card == 'gpt2.lg':
+        config = GPT2Config(
+            n_embd=1280, n_layer=36, n_head=20,
+            lora_attn_dim=lora_dim,
+            lora_attn_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+        )
+    elif model_card == 'gpt2.xl':
+        config = GPT2Config(
+            n_embd=1600, n_layer=48, n_head=25,
+            lora_attn_dim=lora_dim,
+            lora_attn_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+        )
+    return config
 
-if __name__ == '__main__':
-    args = parser.parse_args()
-    parse_gpu(args)
-    print_args(args)
-
+def main(args):
     if args.fp16:
         try:
             from apex import amp
@@ -314,71 +285,44 @@ if __name__ == '__main__':
 
     torch.manual_seed(args.random_seed)
     random.seed(args.random_seed)
-    
+
     if args.rank == 0:
         args.logging = create_exp_dir(args.work_dir)
 
     train_data = FT_Dataset(
-        args.train_data, args.train_batch_size, args.seq_len, 
-        joint_lm=args.obj=='jlm'
-    )     
-    
+        args.train_data, args.train_batch_size, args.seq_len,
+        joint_lm=args.obj == 'jlm'
+    )
+
     valid_data = FT_Dataset(
         args.valid_data, args.valid_batch_size, args.seq_len,
     )
 
     train_loader = DataLoader(
-        train_data, batch_size=args.train_batch_size, num_workers=0, 
+        train_data, batch_size=args.train_batch_size, num_workers=0,
         shuffle=False, pin_memory=False, drop_last=True,
         sampler=torch.utils.data.distributed.DistributedSampler(train_data, seed=args.random_seed)
     )
-    
+
     valid_loader = DataLoader(
-        valid_data, batch_size=args.valid_batch_size, num_workers=0, 
+        valid_data, batch_size=args.valid_batch_size, num_workers=0,
         shuffle=False, pin_memory=False, drop_last=False,
         sampler=torch.utils.data.distributed.DistributedSampler(valid_data, seed=args.random_seed)
     )
 
-    if args.model_card == 'gpt2.sm':
-        config = GPT2Config(
-            n_embd=768, n_layer=12, n_head=12, 
-            lora_attn_dim=args.lora_dim, 
-            lora_attn_alpha=args.lora_alpha, 
-            lora_dropout=args.lora_dropout,
-        )
-    elif args.model_card == 'gpt2.md':
-        config = GPT2Config(
-            n_embd=1024, n_layer=24, n_head=16, 
-            lora_attn_dim=args.lora_dim, 
-            lora_attn_alpha=args.lora_alpha, 
-            lora_dropout=args.lora_dropout,
-        )
-    elif args.model_card == 'gpt2.lg':
-        config = GPT2Config(
-            n_embd=1280, n_layer=36, n_head=20, 
-            lora_attn_dim=args.lora_dim, 
-            lora_attn_alpha=args.lora_alpha, 
-            lora_dropout=args.lora_dropout,
-        )
-    elif args.model_card == 'gpt2.xl':
-        config = GPT2Config(
-            n_embd=1600, n_layer=48, n_head=25, 
-            lora_attn_dim=args.lora_dim, 
-            lora_attn_alpha=args.lora_alpha, 
-            lora_dropout=args.lora_dropout,
-        )
+    config = get_gpt2_config(args.model_card, args.lora_dim, args.lora_alpha, args.lora_dropout)
 
     lm_net = GPT2LMModel(config)
     if args.init_checkpoint is not None:
         print('loading model pretrained weight.')
-        lm_net.load_weight(torch.load(args.init_checkpoint))    
+        lm_net.load_weight(torch.load(args.init_checkpoint))
 
     lm_net = lm_net.cuda()
 
     if args.lora_dim > 0:
         lora.mark_only_lora_as_trainable(lm_net)
     opacus_utils.register_grad_sampler(MergedLinear)(compute_transformers_MergedLinear_grad_sample)
-    
+
     # Ensure that the model's parameters are contiguous
     for p in lm_net.parameters():
         if not p.is_contiguous():
@@ -399,7 +343,7 @@ if __name__ == '__main__':
 
     ALPHAS = [1 + x / 10.0 for x in range(1, 100)] + list(range(12, 64))
     # We instead use the accountant from Gopi et al. (2021) as described in the paper.
-    SAMPLE_RATE = (args.train_batch_size * args.grad_acc)/42061.0
+    SAMPLE_RATE = (args.train_batch_size * args.grad_acc) / 42061.0
     privacy_engine = PrivacyEngine(
         module=lm_net,
         sample_rate=SAMPLE_RATE,
@@ -408,20 +352,20 @@ if __name__ == '__main__':
         max_grad_norm=max_grad_norm,
     )
     privacy_engine.attach(optimizer)
-    delta = 1.0/42061 # We instead use the accountant from Gopi et al. (2021) as described in the paper.
+    delta = 1.0 / 42061  # We instead use the accountant from Gopi et al. (2021) as described in the paper.
 
     try:
         train_step = 0
         for epoch in itertools.count(start=1):
             train_step = train_validate(
-                lm_net, optimizer, scheduler, train_loader, valid_loader, args, 
+                lm_net, optimizer, scheduler, train_loader, valid_loader, args,
                 train_step=train_step, epoch=epoch
             )
 
             # Printing epsilon from opacus privacy engine at the end of each epoch
             eps, alpha = optimizer.privacy_engine.get_privacy_spent(delta)
             print("End of epoch {}, we have epsilon {} for alpha {}".format(epoch, eps, alpha))
-            
+
             if train_step >= args.max_step or (args.max_epoch is not None and epoch >= args.max_epoch):
                 if args.rank == 0:
                     print('-' * 100)
@@ -435,3 +379,206 @@ if __name__ == '__main__':
     torch.distributed.barrier()
     print('cleanup dist ...')
     cleanup(args)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='PyTorch GPT2 ft script')
+    add_gpu_params(parser)
+    add_optimizer_params(parser)
+
+    parser.add_argument('--train_data', required=True, help='location of training data corpus')
+
+    parser.add_argument('--valid_data', required=True, help='location of validation data corpus')
+
+    parser.add_argument('--train_batch_size', type=int, default=8, help='training batch size')
+
+    parser.add_argument('--valid_batch_size', type=int, default=4, help='validation batch size')
+
+    parser.add_argument('--grad_acc', type=int, default=1, help='gradient accumulation steps')
+
+    parser.add_argument('--clip', type=float, default=0.0, help='gradient clip')
+
+    parser.add_argument('--noise_multiplier', type=float, default=0.5, help='DP noise multiplier')
+
+    parser.add_argument('--max_grad_norm', type=float, default=1.0, help='DP maximum per sample gradient norm')
+
+    parser.add_argument('--seq_len', type=int, default=512, help='number of tokens to predict.')
+
+    parser.add_argument('--model_card', default='gpt2.md', choices=['gpt2.sm', 'gpt2.md', 'gpt2.lg', 'gpt2.xl'], 
+                        help='model names')
+
+    parser.add_argument('--init_checkpoint', default=None, help='pretrained checkpoint path')
+
+    parser.add_argument('--fp16', action='store_true', help='train model with fp16')
+
+    parser.add_argument('--log_interval', type=int, default=100, help='log interval')
+
+    parser.add_argument('--eval_interval', type=int, default=2000, help='eval interval')
+
+    parser.add_argument('--save_interval', type=int, default=500, help='save interval')
+
+    parser.add_argument('--work_dir', type=str, default=os.getenv('PT_OUTPUT_DIR', 'gpt2_model'), 
+                        help='working folder.')
+
+    parser.add_argument('--lora_dim', type=int, default=0, help='lora attn dimension')
+
+    parser.add_argument('--lora_alpha', type=int, default=128, help='lora attn alpha')
+
+    parser.add_argument('--obj', default='clm', choices=['jlm', 'clm'], 
+                        help='language model training objective')
+
+    parser.add_argument('--lora_dropout', default=0.0, type=float, 
+                        help='dropout probability for lora layers')
+
+    parser.add_argument('--label_smooth', default=0.0, type=float, help='label smoothing')
+
+    parser.add_argument('--roll_interval', type=int, default=-1, help='rolling interval')
+
+    parser.add_argument('--roll_lr', type=float, default=0.00001, help='rolling learning rate')
+
+    parser.add_argument('--roll_step', type=int, default=100, help='rolling step')
+
+    parser.add_argument('--eval_epoch', type=int, default=1, help='eval per number of epochs')
+
+    # Add arguments to the parser
+    args = parser.parse_args()
+    parse_gpu(args)
+    print_args(args)
+    
+    main(args)
+
+
+# if __name__ == '__main__':
+#     args = parser.parse_args()
+#     parse_gpu(args)
+#     print_args(args)
+
+#     if args.fp16:
+#         try:
+#             from apex import amp
+#         except Exception as e:
+#             warnings.warn('Could not import amp, apex may not be installed')
+
+#     torch.manual_seed(args.random_seed)
+#     random.seed(args.random_seed)
+    
+#     if args.rank == 0:
+#         args.logging = create_exp_dir(args.work_dir)
+
+#     train_data = FT_Dataset(
+#         args.train_data, args.train_batch_size, args.seq_len, 
+#         joint_lm=args.obj=='jlm'
+#     )     
+    
+#     valid_data = FT_Dataset(
+#         args.valid_data, args.valid_batch_size, args.seq_len,
+#     )
+
+#     train_loader = DataLoader(
+#         train_data, batch_size=args.train_batch_size, num_workers=0, 
+#         shuffle=False, pin_memory=False, drop_last=True,
+#         sampler=torch.utils.data.distributed.DistributedSampler(train_data, seed=args.random_seed)
+#     )
+    
+#     valid_loader = DataLoader(
+#         valid_data, batch_size=args.valid_batch_size, num_workers=0, 
+#         shuffle=False, pin_memory=False, drop_last=False,
+#         sampler=torch.utils.data.distributed.DistributedSampler(valid_data, seed=args.random_seed)
+#     )
+
+#     if args.model_card == 'gpt2.sm':
+#         config = GPT2Config(
+#             n_embd=768, n_layer=12, n_head=12, 
+#             lora_attn_dim=args.lora_dim, 
+#             lora_attn_alpha=args.lora_alpha, 
+#             lora_dropout=args.lora_dropout,
+#         )
+#     elif args.model_card == 'gpt2.md':
+#         config = GPT2Config(
+#             n_embd=1024, n_layer=24, n_head=16, 
+#             lora_attn_dim=args.lora_dim, 
+#             lora_attn_alpha=args.lora_alpha, 
+#             lora_dropout=args.lora_dropout,
+#         )
+#     elif args.model_card == 'gpt2.lg':
+#         config = GPT2Config(
+#             n_embd=1280, n_layer=36, n_head=20, 
+#             lora_attn_dim=args.lora_dim, 
+#             lora_attn_alpha=args.lora_alpha, 
+#             lora_dropout=args.lora_dropout,
+#         )
+#     elif args.model_card == 'gpt2.xl':
+#         config = GPT2Config(
+#             n_embd=1600, n_layer=48, n_head=25, 
+#             lora_attn_dim=args.lora_dim, 
+#             lora_attn_alpha=args.lora_alpha, 
+#             lora_dropout=args.lora_dropout,
+#         )
+
+#     lm_net = GPT2LMModel(config)
+#     if args.init_checkpoint is not None:
+#         print('loading model pretrained weight.')
+#         lm_net.load_weight(torch.load(args.init_checkpoint))    
+
+#     lm_net = lm_net.cuda()
+
+#     if args.lora_dim > 0:
+#         lora.mark_only_lora_as_trainable(lm_net)
+#     opacus_utils.register_grad_sampler(MergedLinear)(compute_transformers_MergedLinear_grad_sample)
+    
+#     # Ensure that the model's parameters are contiguous
+#     for p in lm_net.parameters():
+#         if not p.is_contiguous():
+#             p.data = p.data.contiguous()
+#     lm_net = DPDDP(lm_net)
+#     optimizer = create_adam_optimizer_from_args(lm_net, args)
+
+#     if args.max_step is None:
+#         args.max_step = (args.max_epoch * train_data.num_batches + args.world_size - 1) // args.world_size
+#         print('set max_step:', args.max_step)
+
+#     scheduler = create_optimizer_scheduler(optimizer, args)
+#     if args.fp16:
+#         lm_net, optimizer = amp.initialize(lm_net, optimizer, opt_level="O1")
+
+#     n_layers = len([(n, p) for n, p in lm_net.named_parameters() if p.requires_grad])
+#     max_grad_norm = [args.max_grad_norm / np.sqrt(n_layers)] * n_layers
+
+#     ALPHAS = [1 + x / 10.0 for x in range(1, 100)] + list(range(12, 64))
+#     # We instead use the accountant from Gopi et al. (2021) as described in the paper.
+#     SAMPLE_RATE = (args.train_batch_size * args.grad_acc)/42061.0
+#     privacy_engine = PrivacyEngine(
+#         module=lm_net,
+#         sample_rate=SAMPLE_RATE,
+#         alphas=ALPHAS,
+#         noise_multiplier=args.noise_multiplier,
+#         max_grad_norm=max_grad_norm,
+#     )
+#     privacy_engine.attach(optimizer)
+#     delta = 1.0/42061 # We instead use the accountant from Gopi et al. (2021) as described in the paper.
+
+#     try:
+#         train_step = 0
+#         for epoch in itertools.count(start=1):
+#             train_step = train_validate(
+#                 lm_net, optimizer, scheduler, train_loader, valid_loader, args, 
+#                 train_step=train_step, epoch=epoch
+#             )
+
+#             # Printing epsilon from opacus privacy engine at the end of each epoch
+#             eps, alpha = optimizer.privacy_engine.get_privacy_spent(delta)
+#             print("End of epoch {}, we have epsilon {} for alpha {}".format(epoch, eps, alpha))
+            
+#             if train_step >= args.max_step or (args.max_epoch is not None and epoch >= args.max_epoch):
+#                 if args.rank == 0:
+#                     print('-' * 100)
+#                     print('End of training')
+#                 break
+#     except KeyboardInterrupt:
+#         if args.rank == 0:
+#             print('-' * 100)
+#             print('Exiting from training early')
+
+#     torch.distributed.barrier()
+#     print('cleanup dist ...')
+#     cleanup(args)

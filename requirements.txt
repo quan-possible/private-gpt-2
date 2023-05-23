@@ -1,5 +1,3 @@
---find-links https://download.pytorch.org/whl/torch_stable.html
-torch==2.0.0+cu117
 numpy
 transformers
 spacy
@@ -8,5 +6,4 @@ tensorboard
 progress
 loralib
 opacus
-tokenizers==0.12.1
-git+https://github.com/pytorch/opacus.git@7079be
+tokenizers

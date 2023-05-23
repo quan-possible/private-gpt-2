@@ -1,0 +1,17 @@
+name: dp_gpt
+channels:
+  - nvidia
+  - pytorch
+  - conda-forge
+dependencies:
+  - pytorch
+  - pytorch-cuda=11.7
+  - transformers
+  - tqdm
+  - spacy
+  - tensorboard
+  - progress
+  - pip
+  - pip:
+    - loralib
+    - git+https://github.com/pytorch/opacus.git@7079be
