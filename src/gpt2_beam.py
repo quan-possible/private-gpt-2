@@ -321,8 +321,8 @@ def beam(model, data_iter, args):
 
 
             with torch.no_grad():
-                _id = distributed_gather(args, _id)
-                output = distributed_gather(args, best_sequence)
+                _id = distributed_gather(_id)
+                output = distributed_gather(best_sequence)
                 #score = distributed_gather(args, score)
                 torch.distributed.barrier()
 
