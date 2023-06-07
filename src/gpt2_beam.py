@@ -24,8 +24,7 @@ from gpu import (
     add_gpu_params, 
     parse_gpu, 
     distributed_opt, 
-    distributed_gather, 
-    distributed_sync, 
+    distributed_gather,
     cleanup
 )
 
@@ -325,7 +324,7 @@ def beam(model, data_iter, args):
                 _id = distributed_gather(args, _id)
                 output = distributed_gather(args, best_sequence)
                 #score = distributed_gather(args, score)
-                distributed_sync(args)
+                torch.distributed.barrier()
 
             if args.rank == 0:
                 _id = _id.view(-1).cpu()
@@ -408,6 +407,6 @@ if __name__ == '__main__':
 
     print('model sampling ...')
     beam(lm_net, valid_loader, args)
-    distributed_sync(args)
+    torch.distributed.barrier()
     print('cleanup dist ...')
     cleanup(args)

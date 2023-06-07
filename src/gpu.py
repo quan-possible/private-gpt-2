@@ -44,18 +44,20 @@ def parse_gpu(args):
     args.local_rank = int(os.environ["LOCAL_RANK"])
     args.rank = int(os.environ["RANK"])
     args.world_size = int(os.environ["WORLD_SIZE"])
+
+    # Set the device for each process
     args.device = torch.device("cuda", args.local_rank)
     dist.init_process_group(backend="nccl")
     torch.cuda.set_device(args.device)
+    print("args.device:", args.device)
 
     print(
-        ("myrank:", args.rank),
+        ("global_rank:", args.rank),
         ("local_rank:", args.local_rank),
         ("device_count:", torch.cuda.device_count()),
         ("world_size:", args.world_size),
         sep="\n"
     )
-
 
 def cleanup():
     torch.distributed.destroy_process_group()

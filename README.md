@@ -63,7 +63,9 @@ torchrun --standalone --nproc_per_node=gpu src/gpt2_ft.py \
 
 2. Generate outputs from the trained model using beam search:
 ```
-python -m torch.distributed.launch --nproc_per_node=16 src/gpt2_beam.py \
+srun torchrun --standalone \
+    --nproc_per_node=gpu \
+    src/gpt2_beam.py \
     --data ./data/e2e/test.jsonl \
     --batch_size 1 \
     --seq_len 512 \
