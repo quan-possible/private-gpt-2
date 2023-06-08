@@ -67,12 +67,11 @@ srun torchrun --standalone \
     --nproc_per_node=gpu \
     src/gpt2_beam.py \
     --data ./data/e2e/test.jsonl \
-    --batch_size 1 \
+    --batch_size 14 \
     --seq_len 512 \
     --eval_len 64 \
     --model_card gpt2.md \
     --init_checkpoint ./trained_models/GPT2_M/e2e \
-    --platform local \
     --lora_dim 4 \
     --lora_alpha 32 \
     --beam 10 \
@@ -80,7 +79,7 @@ srun torchrun --standalone \
     --no_repeat_ngram_size 4 \
     --repetition_penalty 1.0 \
     --eos_token_id 628 \
-    --work_dir ./trained_models/GPT2_M/e2e \
+    --work_dir eval/e2e/predict \
     --output_file predict.jsonl \
     --hyperparam
 ```
@@ -89,14 +88,14 @@ srun torchrun --standalone \
 ```
 python src/gpt2_decode.py \
     --vocab ./vocab \
-    --sample_file ./trained_models/GPT2_M/e2e/predict.jsonl \
+    --sample_file ./eval/e2e/predict/predict.jsonl \
     --input_file ./data/e2e/test_formatted.jsonl \
-    --output_ref_file e2e_ref.txt \
-    --output_pred_file e2e_pred.txt
+    --output_ref_file ./eval/e2e/predict/e2e_ref.txt \
+    --output_pred_file ./eval/e2e/predict/e2e_pred.txt
 ```
 
 4. Run evaluation on E2E test set
 
 ```
-python eval/e2e/measure_scores.py e2e_ref.txt e2e_pred.txt -p
+python eval/e2e/measure_scores.py ./eval/e2e/predict/e2e_ref.txt ./eval/e2e/predict/e2e_pred.txt -p
 ```

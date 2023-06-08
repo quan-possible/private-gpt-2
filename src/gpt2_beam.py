@@ -22,8 +22,7 @@ import numpy as np
 
 from gpu import (
     add_gpu_params, 
-    parse_gpu, 
-    distributed_opt, 
+    parse_gpu,
     distributed_gather,
     cleanup
 )
@@ -409,4 +408,4 @@ if __name__ == '__main__':
     beam(lm_net, valid_loader, args)
     torch.distributed.barrier()
     print('cleanup dist ...')
-    cleanup(args)
+    cleanup()

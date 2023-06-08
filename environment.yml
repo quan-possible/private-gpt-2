@@ -11,6 +11,8 @@ dependencies:
   - spacy
   - tensorboard
   - progress
+  - matplotlib
+  - anaconda
   - pip
   - pip:
     - loralib

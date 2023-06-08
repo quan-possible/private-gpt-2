@@ -3,6 +3,7 @@ venv
 mahti
 puhti
 hpc
+eval/predict
 *.out
 *.jsonl
 *.bin
